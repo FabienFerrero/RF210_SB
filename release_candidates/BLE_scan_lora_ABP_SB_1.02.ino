@@ -26,7 +26,7 @@
 #define SLEEP 1         // Define if the ESP32 uses sleep mode or not
 #define SEND_BLE_ADD 1  // Define if LoRa packet are sent to network
 #define BLUETOOTH 1     // Define if bluetooth detection is activated
-
+#define RAK3172_RESET_PIN 10
 
 #include <BLEDevice.h>
 #include <BLEUtils.h>
@@ -75,7 +75,12 @@ static BLEAddress* list = (BLEAddress*)malloc(ID_array * sizeof(BLEAddress));
 static BLEAddress* temp_list = (BLEAddress*)malloc(ID_array * sizeof(BLEAddress));
 int temp_list_cnt = 0;
 static int8_t flagtest = 0;
-
+/*
+// Check RAK3172 working
+bool flag_rak = false;
+String current_data = "";
+bool even_number_iteration = false;
+*/
 static int8_t cnt[ID_array];    // counter of presence for the BLEAddress detected
 static int8_t undet[ID_array];  // counter of presence for the BLEAddress detected
 static int8_t cntWL[WL_array];  // counter of presence for the BLEAddress detected
@@ -98,14 +103,7 @@ void flush_serial_AT();
 void array_to_string();
 
 void setup() {
-
-  Serial.begin(115200);
-  while(!Serial){
-  };
-
-  // Starting the watchdog
-  wdt.begin();
-
+  
   pinMode(txPin, OUTPUT);
   pinMode(rxPin, INPUT);
   pinMode(LED, OUTPUT);
@@ -114,9 +112,17 @@ void setup() {
   delay(2000);
   digitalWrite(LED, LOW);
 
+  Serial.begin(115200);
+  //while(!Serial){
+  //};
+
+  // Starting the watchdog
+  wdt.begin();
+
+
 #ifdef LORA
-  pinMode(10, OUTPUT);     //Rak enable
-  digitalWrite(10, HIGH);  // Switch on RAK
+  pinMode(RAK3172_RESET_PIN, OUTPUT);     //Rak enable
+  digitalWrite(RAK3172_RESET_PIN, HIGH);  // Switch on RAK
 
   mySerial1.begin(115200, SERIAL_8N1, rxPin, txPin);
   while (!mySerial1) {
@@ -124,6 +130,8 @@ void setup() {
 
   Serial.println("Setup at command");
   mySerial1.println("AT");  // Start AT command
+  delay(300);
+  mySerial1.println("ATE");
   delay(300);
   mySerial1.println("AT+NWM=1");  // Set LoRaWan
   delay(300);
@@ -142,16 +150,7 @@ void setup() {
   mySerial1.printf("AT+APPSKEY=");
   mySerial1.println(appskey);
   delay(200);
-/*
-  while (mySerial1.available()) {
-    //current_data = readStringUntil("\n");
-    //if(current_data=="+EVT:TX_DONE"){
-    //  flag_rak=1;
-    //}
-    //Serial.write(current_data); // read it and send it out Serial (USB)
-    Serial.write(mySerial1.read());
-  }
-  */
+
   flush_serial_AT();
 
 #endif
@@ -197,6 +196,11 @@ void loop() {
 
   /*___________________Sending data_______________________________________*/
 
+/*
+even_number_iteration = !even_number_iteration;
+if(even_number_iteration==false){
+  flag_rak = false; // controller for the rak get back to false
+}*/
 
 #ifdef SEND_BLE_ADD
   sendLoraAddresses();
@@ -228,7 +232,7 @@ Serial.println("Sleep two over");
 
 #ifdef LORA
 Serial.println("Send environment data");
-
+  flush_serial_AT();
   mySerial1.println("AT");
   mySerial1.println("ATC+SENSOR");  // Send lora sensor
   wdt.handle();
@@ -244,6 +248,16 @@ Serial.println("Sleep three");
 EnterModeSleep();
 Serial.println("Sleep three over");
 
+  /*___________________Resets if no data sent during 2 iterations___________________________________*/
+
+/*
+if(flag_rak == false && even_number_iteration == true) {
+  digitalWrite(RAK3172_RESET_PIN, LOW);
+  delay(100); // Attendre un moment pour s'assurer que le RAK3172 est réinitialisé
+  digitalWrite(RAK3172_RESET_PIN, HIGH); // Remettre la broche à HIGH
+  // Réinitialiser l'ESP32
+  esp_restart();
+}*/
 }
 
 ////////////////////////////////////////////////////////////////////////////////////
@@ -438,7 +452,7 @@ void sendLoraBleData() {
 
   char str[56] = "";
   array_to_string(mydata, 5, str);
-
+  flush_serial_AT();
   mySerial1.println("AT");
   mySerial1.printf("AT+SEND=3:");
   mySerial1.println(str);
@@ -467,6 +481,7 @@ void sendLoraAddresses() {
     str = str + temp;
   }
 if(str.length() > 0){
+  flush_serial_AT();
   mySerial1.println("AT");
   mySerial1.printf("AT+SEND=4:");
   mySerial1.println(str);
@@ -532,10 +547,22 @@ int measure_bat() {
 }
 
 void flush_serial_AT() {
-
+/*
   if (mySerial1.available()) {  // If anything comes in Serial1 (pins 4 & 5)
     while (mySerial1.available())
       Serial.write(mySerial1.read());  // read it and send it out Serial (USB)
+  }
+  delay(100);
+*/
+    while (mySerial1.available()) {
+      /*current_data = mySerial1.readStringUntil('\n');
+      current_data.trim();
+      if(current_data=="+EVT:TX_DONE"){
+        flag_rak=true;
+      }
+      Serial.print(current_data);
+      Serial.println();*/
+      Serial.write(mySerial1.read());
   }
   delay(100);
 }
