@@ -1,9 +1,9 @@
 // Define this to get the settings for the four test nodes, or leave it undefined to fill in your own settings in the #else block below
-#define SB_NB 2
+#define SB_NB 16
 
 #if SB_NB == 1
 String devAddr = "260BE20F";
-String nwkkey = "F1479782F58401DD346C1A0128068EE0";
+String nwkkey = "F1479782F58401DD346C1A0128068EE0"; 
 String appskey = "9B431A58B90A18D452861898F5807E8F";
 
 #elif SB_NB == 2
@@ -70,6 +70,18 @@ static String appskey = "DADA67DB1EDA14D589C69B5B1EC553E3";
 static String devAddr = "260B5653";
 static String nwkkey = "7546BB9D0A93C8FB088A5B19CFC3DE65";
 static String appskey = "2EA455003A1F17C0036B74D1F384A8F4";
+
+#elif SB_NB == 15
+static String devAddr = "260BC6EC";
+static String nwkkey = "4C400DFF11B1F189A52B9560A4E49D78";
+static String appskey = "1CC6EF22C36FB4DC83642045B3245369";
+
+#elif SB_NB == 16
+static String devAddr = "260BA47A";
+static String nwkkey = "191BA678F6D3FDD16E2E930D3603BF4E";
+static String appskey = "85EBCED9E3F1BC78B453A2FBE85433A6";
+
+
 
 #else
 ///////////////////////////////////
