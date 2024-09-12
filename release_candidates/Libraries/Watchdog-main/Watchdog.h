@@ -13,15 +13,14 @@
 
 #include <esp_task_wdt.h>
 
-class Watchdog 
-{
-    public:
-      Watchdog(int alarmPeriod);
-      void begin();
-      void handle();
+class Watchdog {
+public:
+    Watchdog(int alarmPeriod);
+    void begin();
+    void handle();
+    static void triggerReset();
 
-    private:
-      int _alarmPeriod;
+private:
+    int _alarmPeriod;
 };
-
 #endif
