@@ -69,10 +69,18 @@ Configure the following parameters for BLE device counting and management:
 
 ## Possible improvements
 
-- Temperature and humidity sensors calibrations. Note : there are differences between SCD4X and BME680 measurements.
+- The most important : Temperature and humidity sensors calibrations. Note : there are differences between SCD4X and BME680 measurements.
 - Optimizing energy saving mode. For example : remove Bluetooth detection while on battery 
 - Process sound for the new card version. The mean done here gives no information, maybe calculate the sound in dBs.
 - Optimize environment datas sending for the new code of the RAK3172
+
+## Possible problems
+
+The RAK3172 is sometimes hard to flash. If it is impossible, please try:
+- resetting the RAK3172
+- unplug and plug the RAK3172
+- erase all flash memory and reinstall the firmware with STM32 Cube Programmer
+
   
 ## Date & Author
 
