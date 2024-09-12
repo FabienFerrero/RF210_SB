@@ -1,5 +1,3 @@
-# Author : Augustin
-
 # RF210_SB
 
 
