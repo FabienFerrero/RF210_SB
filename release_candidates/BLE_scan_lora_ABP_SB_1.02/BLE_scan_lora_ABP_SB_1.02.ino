@@ -23,19 +23,33 @@
 #include "bluetooth_list_management.h"
 #include <Watchdog.h>
 
-#define PERIOD_IN_CHARGE 60    // All measurements sent every minutes
-#define PERIOD_ON_BATTERY 600  // Only environment data sent, and every 5 minutes
-#define SEND_BLE_ADD 1         // Define if LoRa packet are sent to network
+                  /* Pins of the ESP32, do not change it */
 #define RAK3172_RESET_PIN 10
+#define LED_R 8
+#define LED_G 9
+#define LED_B 2
 
+                  /* Parameters that you can change */
 
-#define CHECK_RAK 1  // Define if we check if the RAK sends data or not
+#define PERIOD_IN_CHARGE 60    // Period between each message sending  if it is alimented by the USB port (seconds) 
+#define PERIOD_ON_BATTERY 600  // Period between each message sending if it is alimented by the battery (seconds)
+
+#define BATTERY_LIMIT 3.5   // lowest limit of battery before an extreme energy saving mode (volts)
+#define EMERGENCY_SLEEP 3600  // 3600 seconds = 1 hour:  Duration of the emergency sleep before a new check 
+
+          /* Parameters that can deactivate some parts of the code : comment it to deactivate */
+
+#define CHECK_RAK 1  // Security to check if the RAK3172 sends environmental data or not, and resets if not
 #define BLUETOOTH 1  // Define if bluetooth detection is activated
 #define LORA 1       // Define if LoRa packet are sent to network
-//#define SLEEP 1      // Define if the ESP32 uses sleep mode or not
+//#define SLEEP 1      // Define if the ESP32 uses light sleep mode between lora packets sending or not. Does not work for me, but forums talk about it...
+#define BLUETOOTH_SWITCH 1 // Define if the Bluetooth is deactivated during the energy saving mode
 
+// These ones will only work for the new version of the card, please deactivate them if you are using the old version
 #define BATTERY_PRESENCE 1  // Activate it if there is a battery : if so, the card will save as much energy as possible
-#define LED_INDICATOR 1 // Activate it if you are using the new version of the card and if you want to debug
+#define LED_INDICATOR 1 // Activate it you want to debug using leds. To add some debug signals, use the function blinkLeds
+
+            /* Debuging colors code */
 
 // Blue : blinks 2 seconds for the setup function
 
@@ -52,15 +66,6 @@
 
 
 
-
-#define BATTERY_LIMIT 3.5   // lowest limit of battery before an extreme energy saving mode
-#define EMERGENCY_SLEEP 3600  // 3600 seconds = 1 hour
-
-
-
-#define LED_R 8
-#define LED_G 9
-#define LED_B 2
 
 
 
@@ -87,7 +92,6 @@ static const int txPin = 21;
 String previousPowerStatus = "1";
 String new_powerStatus = "1";
 float batteryLevel;
-int period_iteration = PERIOD_IN_CHARGE;
 bool isDeepSleep = 0;
 
 #ifdef CHECK_RAK
@@ -116,7 +120,7 @@ void blinkLed(int ledPin1, int numBlinks = 1, int ledPin2 = -1) {
 
 
 void setup() {
-
+#ifdef LED_INDICATOR
   pinMode(LED_R, OUTPUT);  // LED Red
   pinMode(LED_G, OUTPUT);  // LED Green
   pinMode(LED_B, OUTPUT);  // LED Blue
@@ -125,7 +129,7 @@ void setup() {
   digitalWrite(LED_G, HIGH);  // turn the LED off (HIGH is the voltage level)
   digitalWrite(LED_B, HIGH);  // turn the LED off (HIGH is the voltage level)
   delay(1000);
-
+#endif
   /*
   blinkLed(LED_B,5);
     blinkLed(LED_R,5);
@@ -223,14 +227,17 @@ void manageBluetooth() {
 
         if (previousPowerStatus != new_powerStatus) {
           if (new_powerStatus == "1") {
-            //enableBluetooth();
-            //period_iteration = PERIOD_IN_CHARGE;
+            #ifdef BLUETOOTH_SWITCH
+              enableBluetooth();
+            #endif
             isDeepSleep = 0;  //
             // Color red :  blinks one time if energy saving mode deactivation
             blinkLed(LED_R);
           } else if (new_powerStatus == "0") {
-            //disableBluetooth();
-            //period_iteration = PERIOD_ON_BATTERY;
+            #ifdef BLUETOOTH_SWITCH
+              disableBluetooth();
+            #endif
+
             isDeepSleep = 1;
             // Color red :  blinks two times if energy saving mode activation
             blinkLed(LED_R, 2);
