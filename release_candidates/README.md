@@ -47,23 +47,33 @@ If you are using an old version of the card, please deactivate the following par
 
 - **LED_INDICATOR**: `1`  
   Enables LED indicators for debugging. Use the `blinkLeds` function for additional debug signals.
+ 
+### BLE Parameters
 
-### Debug Messages
+Configure the following parameters for BLE device counting and management:
 
-- **Blue LED**: Blinks once every 2 seconds during setup.
-- **Green LED**:  
-  - Blinks once for BLE detection sending.
-  - Blinks twice for BLE data sending (e.g., `id_num`, ...).
-  - Blinks three times for environment data sending.
+- **`nullscan`**: `5`  
+  Number of undetected BLE scans before removing a device from the list.
 
-- **Red LED**:  
-  - Blinks once to indicate activation of energy saving mode.
-  - Blinks twice to indicate deactivation of energy saving mode.
-  - Blinks five times when entering deep sleep with energy saving mode activated.
-  - Blinks ten times for emergency deep sleep if the battery is empty.
+- **`id_max_count`**: `15`  
+  Number of continuous detections required to add a device to the whitelist.
 
-- **Yellow LED**: Blinks once if the RAK3172 resets due to failure in confirming environmental data transmission.
+- **`margin_WL`**: `50`  
+  Margin added to the whitelist counter when a device is added to the whitelist.
 
+- **`inc_margin_WL`**: `5`  
+  Margin added to the whitelist counter when a device already in the whitelist is detected again.
+
+- **`rssi_threshold`**: `-100` dBm  
+  RSSI threshold to consider a BLE detection valid. Detections with an RSSI below this threshold are ignored.
+
+## Possible improvements
+
+- Temperature and humidity sensors calibrations. Note : there are differences between SCD4X and BME680 measurements.
+- Optimizing energy saving mode. For example : remove Bluetooth detection while on battery 
+- Process sound for the new card version. The mean done here gives no information, maybe calculate the sound in dBs.
+- Optimize environment datas sending for the new code of the RAK3172
+  
 ## Date & Author
 
 - **Date**: 09/12/2024
