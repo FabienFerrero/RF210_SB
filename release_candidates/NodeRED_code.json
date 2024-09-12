@@ -1,0 +1,589 @@
+[
+    {
+        "id": "b9e9cc686354fd39",
+        "type": "tab",
+        "label": "Bat Forum / Clusters",
+        "disabled": false,
+        "info": "",
+        "env": []
+    },
+    {
+        "id": "e7be943a.346b98",
+        "type": "influxdb out",
+        "z": "b9e9cc686354fd39",
+        "influxdb": "1abb2b94.cfcc04",
+        "name": "",
+        "measurement": "msg.measurement",
+        "precision": "",
+        "retentionPolicy": "",
+        "database": "",
+        "retentionPolicyV18Flux": "",
+        "org": "",
+        "bucket": "",
+        "x": 1030,
+        "y": 120,
+        "wires": []
+    },
+    {
+        "id": "7a234e3c.0d37d",
+        "type": "debug",
+        "z": "b9e9cc686354fd39",
+        "name": "",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 330,
+        "y": 120,
+        "wires": []
+    },
+    {
+        "id": "6a66b1f0.8be3c",
+        "type": "change",
+        "z": "b9e9cc686354fd39",
+        "name": "Other data",
+        "rules": [
+            {
+                "t": "move",
+                "p": "payload.uplink_message.decoded_payload",
+                "pt": "msg",
+                "to": "payload",
+                "tot": "msg"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 630,
+        "y": 380,
+        "wires": [
+            [
+                "154425de40b90a4f",
+                "e7be943a.346b98"
+            ]
+        ]
+    },
+    {
+        "id": "2f03127f.5ec80e",
+        "type": "function",
+        "z": "b9e9cc686354fd39",
+        "name": "Decrypt Payload",
+        "func": "const PORT_NUMBER = 4;\n\nif (msg.payload.uplink_message.f_port == PORT_NUMBER) { // if the device sends a list of new detected devices (port 4)\n\n// Initialisation des objets avec des valeurs par défaut\nvar defaultDevices = {\n    \"sb-000\": [],\n    \"sb-001\": [],\n    \"sb-002\": [],\n    \"sb-003\": [],\n    \"sb-004\": [],\n    \"sb-005\": [],\n    \"sb-006\": [],\n    \"sb-007\": [],\n    \"sb-008\": [],\n    \"sb-009\": [],\n    \"sb-010\": [],\n    \"sb-011\": [],\n    \"sb-012\": [],\n    \"sb-013\": [],\n    \"sb-014\": [],\n    \"sb-015\": [],\n\n};\n\nvar possible_trajectories = {\n    \"1-2\" : [0,0], // 1 -> 2 and 2 -> 1\n    \"1-3\" : [0,0], // 1 -> 3 and 3 -> 1\n    \"2-3\" : [0,0], // 2 -> 3 and 3 -> 2\n};\n\n\nvar clusters = {\n    // bibliothèque (-2)\n    \"sb-004\": 1,\n    \"sb-009\": 1,\n    \"sb-012\": 1,\n    \"sb-013\": 1,\n    // learning center (-1)\n    \"sb-006\": 1,\n    \"sb-007\": 1,\n    \"sb-008\": 1,\n    // entrée LEAT\n    \"sb-002\": 2,\n    // entrée amphithéâtre\n    \"sb-003\": 3,\n\n    // hall et salles F\n    //\"sb-000\": ,\n    //\"sb-001\": ,\n    //\"sb-005\": ,\n    //\"sb-010\": ,\n    //\"sb-011\": ,\n    //\"sb-015\": ,\n    // amphitéâtre\n    //\"sb-014\": 2,\n}\n\nvar number_trajectories = flow.get('number_trajectories') || {...possible_trajectories} // contains number of trajectories in each direction\nvar detected_devices = flow.get('detected_devices') || { ...defaultDevices }; // contains addresses\nvar iterations_detected_devices = flow.get('iterations_detected_devices') || { ...defaultDevices }; // contains iterations\nvar time_measurement = flow.get('time_measurement') || { ...defaultDevices }; // contains hours of measurements\nvar rssi = flow.get('rssi') || { ...defaultDevices }; // contains RSSI of the device\n\n\nvar paths = []; // will contain all trajectories we will send\n\nvar msg1 = {};\nvar msg2 = {};\nvar msg3 = {};\n\nconst BYTES_PER_MESSAGE = 14; // 12 bytes for the address, 2 bytes for the RSSI value\nconst NUM_MAX_ITERATIONS = 15; // after 15 minutes, the address disappear from the memory\nconst RSSI_LIMIT = -90; // we ignore RSSI lower than -80 dBm\n\nvar deviceID = msg.measurement;\n// the error message appears before the PORT_NUMBER check\n//node.warn(deviceID);\n\n\n    //node.warn(msg.measurement);\n    // if the device is not in a cluster, we don't process its message\n    if(!clusters.hasOwnProperty(deviceID)){\n        //node.warn(\"We have a device which is not in a cluster\");\n        return;\n    } \n    // get the data and convert into hexadecimal\n    var detected_addresses = Buffer.from(msg.payload.uplink_message.frm_payload, 'base64').toString('hex');\n    var nbad = detected_addresses.length / BYTES_PER_MESSAGE; // number of addresses we have\n\n    for (let step = 0; step < nbad; step++) { // for each new address detected\n        var single_address = detected_addresses.slice(step * BYTES_PER_MESSAGE, step * BYTES_PER_MESSAGE + 12); // get the data and store it in single_address\n        var single_rssi_level = -parseInt(detected_addresses.slice(step * BYTES_PER_MESSAGE + 12, step * BYTES_PER_MESSAGE + 14)); // get the data and store it in single_rssi_level\n\n        if(single_rssi_level > RSSI_LIMIT){\n        /* Step 1 : add the address to the list of the concerned current_device if it does not belong to another device in the cluster */\n\n        var flag_address_exists=0;\n        var address_owner = \"\";\n        // for each device existing\n        for(let current_device in clusters){\n            // if devices are in the same cluster and both contain the address, activate a flag\n            if(clusters[current_device]==clusters[deviceID] && detected_devices[current_device].indexOf(single_address) > -1){\n                flag_address_exists=1;\n                address_owner=current_device;\n                //node.warn(\"Address already possessed, address owner = \" + address_owner);\n            }\n        }\n        if (flag_address_exists==0) { // if the flag was not activated, add it to the list of the concerned device \n            detected_devices[deviceID].push(single_address); // add address to the list\n            iterations_detected_devices[deviceID].push(NUM_MAX_ITERATIONS); // add iterations to the list\n            time_measurement[deviceID].push(msg.payload.uplink_message.decoded_payload.timex); // add time measurement to the list\n            rssi[deviceID].push(single_rssi_level); // add RSSI of the device to the list\n        } else {\n            // if activated, we only reset the iterations number and update the RSSI\n            iterations_detected_devices[address_owner][detected_devices[address_owner].indexOf(single_address)] = NUM_MAX_ITERATIONS;\n            rssi[address_owner][detected_devices[address_owner].indexOf(single_address)]=single_rssi_level;\n\n        }\n\n\n        /* Step 2: check if it already belongs to an other cluster and if so, creates a vector describing the path */\n\n        // If a path is detected, the address detected is removed from every list except the list of the actual device\n        // This way, only one device will have the address in the next iteration\n        if (flag_address_exists==0){\n            for (let current_device in clusters) { // for each list\n                if (current_device != deviceID && clusters[current_device] != clusters[deviceID]) { // excepting the list of the current_device sending the message and his cluster\n                    if (detected_devices[current_device].indexOf(single_address) > -1 ) { // if the address belongs to the list\n                        var index = detected_devices[current_device].indexOf(single_address); \n                        var time_spent = msg.payload.uplink_message.decoded_payload.timex - time_measurement[current_device][index]; // time between paths\n                        //node.warn(\"Date.now() = \" + msg.payload.uplink_message.decoded_payload.timex);\n                        //node.warn(\"Time_spent = \" + time_spent);\n                        //node.warn(\"Previous date.now = \" +time_measurement[current_device][index] );\n                        // create a path between both devices for the concerned address\n                        paths.push({    \n                            departure: clusters[current_device], \n                            arrival: clusters[deviceID],\n                            rssi_departure: rssi[current_device][index],\n                            rssi_arrival: single_rssi_level,\n                            duration: time_spent, // we consider here the hours of recepetion of the messages in TTN\n                            hour: msg.payload.uplink_message.decoded_payload.timex, // to adapt, we consider here the hour of reception of the message in TTN\n                            address: single_address // we transmit the address of the device to detect if there are multiple paths for a single device\n                        })\n                        // Add the direction to paths_for_graphana for InfluxDB\n                        var path_name;\n\n                        if(clusters[current_device] < clusters[deviceID]){ // ex : 1 -> 2\n                            path_name = clusters[current_device] + \"-\" + clusters[deviceID];\n                            number_trajectories[path_name][0] += 1; // we count positively for this direction\n                        } else if (clusters[current_device] > clusters[deviceID]){ // ex : 2 -> 1\n                            path_name = clusters[deviceID] + \"-\" + clusters[current_device];\n                            number_trajectories[path_name][1] -= 1; // we count negatively for this direction\n                        }\n\n                      \n                        // Remove the departure informations\n                        detected_devices[current_device].splice( index, 1 ); // remove the address from the list\n                        iterations_detected_devices[current_device].splice( index, 1 ); // remove the iterations of the address from the list\n                        time_measurement[current_device].splice(index,1); // remove the time measurement from the list\n                        rssi[current_device].splice(index,1);\n                        break;\n                    }\n                }\n\n            }\n        }\n\n\n        }\n\n    }\n\n\n    var length_lists = {};\n    var l = detected_devices.length;\n    for (var device in clusters) {\n        length_lists[device] = detected_devices[device].length;\n    }\n\n\n    flow.set(\"detected_devices\", detected_devices);\n    flow.set(\"time_measurement\",time_measurement);\n    flow.set(\"iterations_detected_devices\",iterations_detected_devices);\n    flow.set(\"number_trajectories\",number_trajectories);\n\n    if (paths.length > 0) {\n        msg2.payload = paths; // paths detected sent to influxDB\n    }\n    msg2.measurement = msg.measurement;\n    msg3.payload = length_lists; // list of length of lists\n    //node.warn(\"Detected addresses: \" + JSON.stringify(detected_devices)); // Debug message\n    //node.warn(\"paths detected: \" + JSON.stringify(paths)); // Debug message\n    //node.warn(\"time_measurements: \" + JSON.stringify(time_measurement));\n    //node.warn(\"number of iterations: \" + JSON.stringify(iterations_detected_devices)); // Debug message\n    //node.warn(\"rssi: \" + JSON.stringify(rssi));\n\n    //node.warn(\"Length of devices : \" + JSON.stringify(length_lists));\n    return [msg1, msg2, msg3];\n\n} else {return;}\n\n\n\n\n\n\n\n\n\n\n",
+        "outputs": 3,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 480,
+        "y": 240,
+        "wires": [
+            [
+                "84555fdf6ee0f65d"
+            ],
+            [
+                "af9229d6.3fbfc8",
+                "296a1bbe633aaa50"
+            ],
+            [
+                "82a91c10bfa77be0"
+            ]
+        ]
+    },
+    {
+        "id": "af9229d6.3fbfc8",
+        "type": "debug",
+        "z": "b9e9cc686354fd39",
+        "name": "Paths",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "measurement",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 630,
+        "y": 160,
+        "wires": []
+    },
+    {
+        "id": "4929c194.284af",
+        "type": "function",
+        "z": "b9e9cc686354fd39",
+        "name": "RSSI / SNR",
+        "func": "var array = [];\n\n//limit to first gateway, keep it simple\n var i = 0;\n array = [{\n //DateTime: dformat,  \n counter: msg.payload.uplink_message.f_cnt,\n rssi: msg.payload.uplink_message.rx_metadata[i].rssi,\n snr: msg.payload.uplink_message.rx_metadata[i].snr,\n //frequency: msg.payload.uplink_message.settings.frequency,\n //modulation: msg.metadata.modulation,\n //data_rate: msg.payload.uplink_message.settings.data_rate.lora.spreading_factor,\n //airtime: msg.payload.uplink_message.rx_metadata[i].consumed_airtime,\n //dev_id: msg.payload.end_device_ids.device_id,\n //app_id: msg.payload.end_device_ids.application_ids.application_id,\n //hardware_serial: msg.hardware_serial,\n //gtw_id: msg.payload.uplink_message.rx_metadata[i].gateway_ids.gateway_id,\n //lacuna_sat: msg.payload.uplink_message.decoded_payload.decoded.lacuna_sat,\n //lat: msg.payload.uplink_message.decoded_payload.decoded.lat,\n //lng: msg.payload.uplink_message.decoded_payload.decoded.lng,\n// voltage: msg.payload.uplink_message.decoded_payload.analog_in_3,\n //presence_analog: msg.payload.uplink_message.decoded_payload.analog_in_5,\n //presence_trig: msg.payload.uplink_message.decoded_payload.analog_in_7,\n //presence_digi: msg.payload.uplink_message.decoded_payload.digital_in_6,\n //sound_analog: msg.payload.uplink_message.decoded_payload.analog_in_6,\n //tleage: msg.payload.uplink_message.decoded_payload.decoded.tleage,\n //ttf: msg.payload.uplink_message.decoded_payload.decoded.ttf,\n //pressure: msg.payload.uplink_message.decoded_payload.decoded.pressure,\n //temperature: msg.payload.uplink_message.decoded_payload.temperature_1,\n //humidity: msg.payload.uplink_message.decoded_payload.relative_humidity_2,\n //lum: msg.payload.uplink_message.decoded_payload.luminosity_4,\n// Pressure: msg.payload.uplink_message.decoded_payload.Pressure,\n //GAS: msg.payload.uplink_message.decoded_payload.GAS,\n// weight: msg.payload.weight,\n// battery: msg.payload.batt,\n// pressure: msg.payload.press,\n// weighta: (msg.payload.weight)+((reft-((msg.payload.temp)-100))*calib)\n }\n];\n\n\n/* Formattage du deviceID */\n\nvar msg1 = {};\nmsg1.payload = array;\nmsg1.measurement = msg.measurement;\n\nreturn [msg1];",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 630,
+        "y": 300,
+        "wires": [
+            [
+                "71a9f7b26e14c6c8",
+                "e7be943a.346b98"
+            ]
+        ]
+    },
+    {
+        "id": "ad88a7199f144085",
+        "type": "mqtt in",
+        "z": "b9e9cc686354fd39",
+        "name": "All Data",
+        "topic": "v3/bat-forum@ttn/devices/+/up",
+        "qos": "2",
+        "datatype": "json",
+        "broker": "38d0a5bf.c9829a",
+        "nl": false,
+        "rap": false,
+        "inputs": 0,
+        "x": 90,
+        "y": 280,
+        "wires": [
+            [
+                "7a234e3c.0d37d",
+                "47e1e6a91a9846ca"
+            ]
+        ]
+    },
+    {
+        "id": "154425de40b90a4f",
+        "type": "debug",
+        "z": "b9e9cc686354fd39",
+        "name": "All characteristics",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 890,
+        "y": 360,
+        "wires": []
+    },
+    {
+        "id": "e621be7d5d79f7fb",
+        "type": "function",
+        "z": "b9e9cc686354fd39",
+        "name": "Decrypt Payload update",
+        "func": "//var BLEadd03=[];\n\n//var BLEadd02=[];\n\n//var BLEaddsc=[];\nnode.warn(\"UPDATE Detected addresses: \" + JSON.stringify(detected_devices)); // Debug message\n\nvar counter = 0;\n\nvar detected_devices = {\n    \"sb-000\": [],\n    \"sb-001\": [],\n    \"sb-002\": [],\n    \"sb-003\": [],\n    \"sb-004\": [],\n    \"sb-005\": [],\n    \"sb-006\": [],\n    \"sb-007\": [],\n    \"sb-008\": [],\n    \"sb-009\": [],\n    \"sb-010\": [],\n    \"sb-011\": [],\n    \"sb-012\": [],\n    \"sb-013\": [],\n    \"sb-014\": [],\n    \"sb-015\": [],\n\n};\n\n\nvar iterations_detected_devices = {\n    \"sb-000\": [],\n    \"sb-001\": [],\n    \"sb-002\": [],\n    \"sb-003\": [],\n    \"sb-004\": [],\n    \"sb-005\": [],\n    \"sb-006\": [],\n    \"sb-007\": [],\n    \"sb-008\": [],\n    \"sb-009\": [],\n    \"sb-010\": [],\n    \"sb-011\": [],\n    \"sb-012\": [],\n    \"sb-013\": [],\n    \"sb-014\": [],\n    \"sb-015\": [],\n\n};\n\nvar time_measurement = {\n    \"sb-000\": [],\n    \"sb-001\": [],\n    \"sb-002\": [],\n    \"sb-003\": [],\n    \"sb-004\": [],\n    \"sb-005\": [],\n    \"sb-006\": [],\n    \"sb-007\": [],\n    \"sb-008\": [],\n    \"sb-009\": [],\n    \"sb-010\": [],\n    \"sb-011\": [],\n    \"sb-012\": [],\n    \"sb-013\": [],\n    \"sb-014\": [],\n    \"sb-015\": [],\n\n};\n\n\nvar rssi = {\n    \"sb-000\": [],\n    \"sb-001\": [],\n    \"sb-002\": [],\n    \"sb-003\": [],\n    \"sb-004\": [],\n    \"sb-005\": [],\n    \"sb-006\": [],\n    \"sb-007\": [],\n    \"sb-008\": [],\n    \"sb-009\": [],\n    \"sb-010\": [],\n    \"sb-011\": [],\n    \"sb-012\": [],\n    \"sb-013\": [],\n    \"sb-014\": [],\n    \"sb-015\": [],\n\n};\n\n\nvar number_trajectories = {\n    \"1-2\": [0, 0], // 1 -> 2 and 2 -> 1\n    \"1-3\": [0, 0], // 1 -> 3 and 3 -> 1\n    \"2-3\": [0, 0], // 2 -> 3 and 3 -> 2\n};\n\n\n\n//flow.set(\"BLEadd02\",BLEadd02); // to store a variable}\n//flow.set(\"BLEadd03\",BLEadd03); // to store a variable}\n//flow.set(\"BLEaddsc\",BLEaddsc); // to store a variable}\nflow.set(\"counter\",counter);\nflow.set(\"detected_devices\",detected_devices);\nflow.set(\"iterations_detected_devices\",iterations_detected_devices);\nflow.set(\"time_measurement\",time_measurement);\nflow.set(\"rssi\",rssi);\nflow.set(\"number_trajectories\",number_trajectories);",
+        "outputs": 0,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 550,
+        "y": 560,
+        "wires": []
+    },
+    {
+        "id": "167b2d30074f62b2",
+        "type": "inject",
+        "z": "b9e9cc686354fd39",
+        "name": "Reset button",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "1",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 290,
+        "y": 540,
+        "wires": [
+            [
+                "e621be7d5d79f7fb"
+            ]
+        ]
+    },
+    {
+        "id": "71a9f7b26e14c6c8",
+        "type": "debug",
+        "z": "b9e9cc686354fd39",
+        "name": "debug 5",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1000,
+        "y": 320,
+        "wires": []
+    },
+    {
+        "id": "82a91c10bfa77be0",
+        "type": "debug",
+        "z": "b9e9cc686354fd39",
+        "name": "Length of lists",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 960,
+        "y": 240,
+        "wires": []
+    },
+    {
+        "id": "f8df51cd5140ca71",
+        "type": "debug",
+        "z": "b9e9cc686354fd39",
+        "name": "debug 6",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "measurement",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 500,
+        "y": 420,
+        "wires": []
+    },
+    {
+        "id": "a723aed580c932ea",
+        "type": "debug",
+        "z": "b9e9cc686354fd39",
+        "name": "debug 12",
+        "active": false,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "false",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1040,
+        "y": 460,
+        "wires": []
+    },
+    {
+        "id": "296a1bbe633aaa50",
+        "type": "csv",
+        "z": "b9e9cc686354fd39",
+        "name": "",
+        "sep": ",",
+        "hdrin": true,
+        "hdrout": "once",
+        "multi": "one",
+        "ret": "\\n",
+        "temp": "",
+        "skip": "0",
+        "strings": true,
+        "include_empty_strings": "",
+        "include_null_values": "",
+        "x": 890,
+        "y": 500,
+        "wires": [
+            [
+                "e905c9d3d0d658b2",
+                "a723aed580c932ea"
+            ]
+        ]
+    },
+    {
+        "id": "e905c9d3d0d658b2",
+        "type": "file",
+        "z": "b9e9cc686354fd39",
+        "name": "",
+        "filename": "/sharing_folder/test2.csv",
+        "filenameType": "str",
+        "appendNewline": false,
+        "createDir": true,
+        "overwriteFile": "false",
+        "encoding": "none",
+        "x": 1090,
+        "y": 540,
+        "wires": [
+            [
+                "568c8d99d8f2f520"
+            ]
+        ]
+    },
+    {
+        "id": "568c8d99d8f2f520",
+        "type": "debug",
+        "z": "b9e9cc686354fd39",
+        "name": "debug 13",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1320,
+        "y": 580,
+        "wires": []
+    },
+    {
+        "id": "84555fdf6ee0f65d",
+        "type": "csv",
+        "z": "b9e9cc686354fd39",
+        "name": "",
+        "sep": ",",
+        "hdrin": true,
+        "hdrout": "once",
+        "multi": "one",
+        "ret": "\\n",
+        "temp": "",
+        "skip": "0",
+        "strings": true,
+        "include_empty_strings": "",
+        "include_null_values": "",
+        "x": 1170,
+        "y": 380,
+        "wires": [
+            [
+                "b626140b6357a0eb"
+            ]
+        ]
+    },
+    {
+        "id": "b626140b6357a0eb",
+        "type": "file",
+        "z": "b9e9cc686354fd39",
+        "name": "",
+        "filename": "/sharing_folder/TestGrafana.csv",
+        "filenameType": "str",
+        "appendNewline": false,
+        "createDir": true,
+        "overwriteFile": "false",
+        "encoding": "none",
+        "x": 1390,
+        "y": 420,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "47e1e6a91a9846ca",
+        "type": "function",
+        "z": "b9e9cc686354fd39",
+        "name": "Format DeviceID",
+        "func": "// Récupérer le deviceID du message\nvar deviceID = msg.payload.end_device_ids.device_id;\n\n// Ajouter le deviceID transformé à msg.measurement\nmsg.measurement = deviceID;\n\n//node.warn(msg.measurement + \" with port : \" + msg.payload.uplink_message.f_port);\n//if (msg.measurement == \"rf210-sb04\" || msg.measurement == \"rf210-sb09\" ||  msg.measurement == \"rf210-sb12\") {\n\nreturn msg;\n\n",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 290,
+        "y": 300,
+        "wires": [
+            [
+                "2f03127f.5ec80e",
+                "4929c194.284af",
+                "6a66b1f0.8be3c"
+            ]
+        ]
+    },
+    {
+        "id": "05599fc7162fab62",
+        "type": "inject",
+        "z": "b9e9cc686354fd39",
+        "name": "",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": false,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 660,
+        "y": 20,
+        "wires": [
+            [
+                "169b0e784dde1df3"
+            ]
+        ]
+    },
+    {
+        "id": "169b0e784dde1df3",
+        "type": "function",
+        "z": "b9e9cc686354fd39",
+        "name": "Test Trajectory",
+        "func": "var paths_for_graphana = [];\n\n\nvar possible_trajectories = {\n    \"1-2\": [5, -2], // 1 -> 2 and 2 -> 1\n    \"1-3\": [0, 0], // 1 -> 3 and 3 -> 1\n    \"2-3\": [0, 0], // 2 -> 3 and 3 -> 2\n};\n\npaths_for_graphana = [{\n    \"1-2\": 5,\n}\n];\n\nvar paths2 = [ {\n        \"1-2\": -5,\n    }]\n    \n\nvar msg1 = {};\nvar msg2 = {};\n\nmsg2.payload = paths2;\nmsg1.payload = paths_for_graphana;\nmsg1.measurement = \"trajectories\";\nmsg2.measurement = \"trajectories\";\nreturn [msg1,msg2];",
+        "outputs": 2,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 840,
+        "y": 20,
+        "wires": [
+            [
+                "e7be943a.346b98"
+            ],
+            [
+                "e7be943a.346b98"
+            ]
+        ]
+    },
+    {
+        "id": "55891a4f33d0fc7c",
+        "type": "inject",
+        "z": "b9e9cc686354fd39",
+        "name": "Every 1 minute, decrease counters and send trajectories",
+        "props": [
+            {
+                "p": "payload"
+            },
+            {
+                "p": "topic",
+                "vt": "str"
+            }
+        ],
+        "repeat": "60",
+        "crontab": "",
+        "once": false,
+        "onceDelay": "",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 210,
+        "y": 60,
+        "wires": [
+            [
+                "317052294d191686"
+            ]
+        ]
+    },
+    {
+        "id": "317052294d191686",
+        "type": "function",
+        "z": "b9e9cc686354fd39",
+        "name": "Decrypt Payload update",
+        "func": "\nvar detected_devices = flow.get('detected_devices') || {\n      \"sb-000\": [],\n    \"sb-001\": [],\n    \"sb-002\": [],\n    \"sb-003\": [],\n    \"sb-004\": [],\n    \"sb-005\": [],\n    \"sb-006\": [],\n    \"sb-007\": [],\n    \"sb-008\": [],\n    \"sb-009\": [],\n    \"sb-010\": [],\n    \"sb-011\": [],\n    \"sb-012\": [],\n    \"sb-013\": [],\n    \"sb-014\": [],\n    \"sb-015\": [],\n\n};\n\nvar iterations_detected_devices = flow.get('iterations_detected_devices') || {\n     \"sb-000\": [],\n    \"sb-001\": [],\n    \"sb-002\": [],\n    \"sb-003\": [],\n    \"sb-004\": [],\n    \"sb-005\": [],\n    \"sb-006\": [],\n    \"sb-007\": [],\n    \"sb-008\": [],\n    \"sb-009\": [],\n    \"sb-010\": [],\n    \"sb-011\": [],\n    \"sb-012\": [],\n    \"sb-013\": [],\n    \"sb-014\": [],\n    \"sb-015\": [],\n\n};\n\n\nvar time_measurement = flow.get('time_measurement') || {\n  \"sb-000\": [],\n    \"sb-001\": [],\n    \"sb-002\": [],\n    \"sb-003\": [],\n    \"sb-004\": [],\n    \"sb-005\": [],\n    \"sb-006\": [],\n    \"sb-007\": [],\n    \"sb-008\": [],\n    \"sb-009\": [],\n    \"sb-010\": [],\n    \"sb-011\": [],\n    \"sb-012\": [],\n    \"sb-013\": [],\n    \"sb-014\": [],\n    \"sb-015\": [],\n\n};\n\n\nvar rssi = flow.get('rssi') || {\n    \"sb-000\": [],\n    \"sb-001\": [],\n    \"sb-002\": [],\n    \"sb-003\": [],\n    \"sb-004\": [],\n    \"sb-005\": [],\n    \"sb-006\": [],\n    \"sb-007\": [],\n    \"sb-008\": [],\n    \"sb-009\": [],\n    \"sb-010\": [],\n    \"sb-011\": [],\n    \"sb-012\": [],\n    \"sb-013\": [],\n    \"sb-014\": [],\n    \"sb-015\": [],\n\n};\n\n\nvar number_trajectories = flow.get('number_trajectories') || {\n    \"1-2\": [0, 0], // 1 -> 2 and 2 -> 1\n    \"1-3\": [0, 0], // 1 -> 3 and 3 -> 1\n    \"2-3\": [0, 0], // 2 -> 3 and 3 -> 2\n};\n\n\n\nfor(var device in iterations_detected_devices){\n    // Decrease by 1 each address detected\n    for (let i = 0; i < iterations_detected_devices[device].length ; i++) {\n        iterations_detected_devices[device][i] -= 1;\n        // if equal to zero, remove it from the list\n        if (iterations_detected_devices[device][i] == 0) {\n            detected_devices[device].splice(i, 1); // remove the address from the list\n            iterations_detected_devices[device].splice(i, 1); // remove the iterations of the address from the list\n            time_measurement[device].splice(i,1); // remove the time measurement from the list\n            rssi[device].splice(i,1);\n            i--;\n        }\n    }\n}\n\nvar first_direction = {\n    \"1-2\": number_trajectories[\"1-2\"][0],\n    \"1-3\": number_trajectories[\"1-3\"][0],\n    \"2-3\": number_trajectories[\"2-3\"][0],\n\n\n};\nvar second_direction = {\n    \"1-2\": number_trajectories[\"1-2\"][1],\n    \"1-3\": number_trajectories[\"1-3\"][1],\n    \"2-3\": number_trajectories[\"2-3\"][1],\n};\n\nvar msg1 = {};\nvar msg2 = {};\n\nmsg1.measurement = \"trajectories\";\nmsg2.measurement = \"trajectories\";\n\nmsg1.payload = first_direction;\nmsg2.payload = second_direction;\n\n\n// reset number of trajectories\nnumber_trajectories = {\n    \"1-2\": [0, 0], // 1 -> 2 and 2 -> 1\n    \"1-3\": [0, 0], // 1 -> 3 and 3 -> 1\n    \"2-3\": [0, 0], // 2 -> 3 and 3 -> 2\n};\n\nnode.warn(\"Here it's time to reset trajectories counters and decrease iterations by one\");\n//node.warn(\"Decreasing counters of 1 :\" + JSON.stringify(iterations_detected_devices)); // Debug message\n\nflow.set(\"rssi\",rssi);\nflow.set(\"detected_devices\", detected_devices);\nflow.set(\"iterations_detected_devices\",iterations_detected_devices);\nflow.set(\"time_measurement\",time_measurement);\nflow.set(\"number_trajectories\",number_trajectories);\n\nreturn [msg1,msg2];",
+        "outputs": 2,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 590,
+        "y": 80,
+        "wires": [
+            [
+                "e7be943a.346b98",
+                "9fe66a345cb08214"
+            ],
+            [
+                "e7be943a.346b98",
+                "9fe66a345cb08214"
+            ]
+        ]
+    },
+    {
+        "id": "9fe66a345cb08214",
+        "type": "debug",
+        "z": "b9e9cc686354fd39",
+        "name": "trajectories data sent",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1100,
+        "y": 60,
+        "wires": []
+    },
+    {
+        "id": "1abb2b94.cfcc04",
+        "type": "influxdb",
+        "hostname": "influx",
+        "port": "8086",
+        "protocol": "http",
+        "database": "sensor",
+        "name": "sensor",
+        "usetls": false,
+        "tls": "db45ef78.d1fcd",
+        "influxdbVersion": "1.x",
+        "url": "http://localhost:8086",
+        "timeout": "",
+        "rejectUnauthorized": true
+    },
+    {
+        "id": "38d0a5bf.c9829a",
+        "type": "mqtt-broker",
+        "name": "",
+        "broker": "eu1.cloud.thethings.network",
+        "port": "1883",
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "compatmode": false,
+        "protocolVersion": "4",
+        "keepalive": "60",
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closeQos": "0",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "db45ef78.d1fcd",
+        "type": "tls-config",
+        "name": "",
+        "cert": "",
+        "key": "",
+        "ca": "",
+        "certname": "",
+        "keyname": "",
+        "caname": "",
+        "servername": "eu1.cloud.thethings.network:8883",
+        "verifyservercert": false
+    }
+]
